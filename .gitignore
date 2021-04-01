@@ -1,2 +1,6 @@
-test-project
-tm_zig.dll
+/bin/
+/build/
+/test-project/
+
+/tm_zig.*
+/tmbuild.exe

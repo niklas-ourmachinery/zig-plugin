@@ -1,7 +1,8 @@
 @echo off
 
 set HEADERS=C:/Work/themachinery
-set FLAGS=-I %HEADERS% -Wno-microsoft-anon-tag -fms-extensions -Werror
+rem -gocodeview doesn't seem to produce a .pdb file. Why?
+set FLAGS=-I %HEADERS% -Wno-microsoft-anon-tag -fms-extensions -Werror -g -gcodeview
 set BIN=C:\Work\themachinery\bin\Debug
 
 %BIN%/hash

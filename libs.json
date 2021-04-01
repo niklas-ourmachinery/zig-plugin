@@ -1,0 +1,9 @@
+{
+    "premake-win": {
+        "build-platforms": [
+            "windows"
+        ],
+        "lib": "premake-5.0.0-alpha14-windows",
+        "role": "premake5"
+    }
+}

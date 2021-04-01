@@ -1,0 +1,11 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Win64: Attach",
+            "type": "cppvsdbg",
+            "request": "attach",
+            "processName": "the-machinery.exe"
+        }
+    ]
+}

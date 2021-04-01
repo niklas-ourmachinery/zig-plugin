@@ -28,6 +28,7 @@ static struct tm_temp_allocator_api* tm_temp_allocator_api;
 
 #include <plugins/editor_views/asset_browser.h>
 #include <plugins/editor_views/properties.h>
+#include <plugins/the_machinery_shared/asset_aspects.h>
 #include <plugins/ui/draw2d.h>
 #include <plugins/ui/ui.h>
 
@@ -49,6 +50,29 @@ static const char* minimal_template
       "}\n"
       "";
 
+static const char* temp_dir(tm_temp_allocator_i* ta)
+{
+    const char* tmp = tm_os_api->file_system->temp_directory(ta);
+    const uint64_t rnd = tm_random_api->next();
+    const char* dir = tm_temp_allocator_api->printf(ta, "%szig-plugin-%" PRIX64, tmp, rnd);
+    const bool made_dir = tm_os_api->file_system->make_directory(dir);
+    return made_dir ? dir : 0;
+}
+
+static const char* write_c_file_to_temp_path(tm_the_truth_o* tt, tm_tt_id_t c_file, tm_temp_allocator_i* ta)
+{
+    const char* text = tm_the_truth_api->get_string(tt, tm_tt_read(tt, c_file), TM_TT_PROP__C_FILE__TEXT);
+    const char* dir = temp_dir(ta);
+    if (!dir)
+        return 0;
+    const char* c_file_path = tm_temp_allocator_api->printf(ta, "%s\\temp.c", dir);
+    const uint64_t text_len = strlen(text);
+    const tm_file_o f = tm_os_api->file_io->open_output(c_file_path);
+    const bool success = tm_os_api->file_io->write(f, text, strlen(text));
+    tm_os_api->file_io->close(f);
+    return success ? c_file_path : 0;
+}
+
 static void private__compile(tm_the_truth_o* tt, tm_tt_id_t c_file, tm_tt_undo_scope_t undo_scope, tm_ui_o* ui)
 {
     TM_INIT_TEMP_ALLOCATOR(ta);
@@ -58,25 +82,17 @@ static void private__compile(tm_the_truth_o* tt, tm_tt_id_t c_file, tm_tt_undo_s
 
     // Compile the DLL
     do {
-        const char* text = tm_the_truth_api->get_string(tt, tm_tt_read(tt, c_file), TM_TT_PROP__C_FILE__TEXT);
-
-        const char* tmp = tm_os_api->file_system->temp_directory(ta);
-        const uint64_t rnd = tm_random_api->next();
-        const char* dir = tm_temp_allocator_api->printf(ta, "%szig-plugin-%" PRIX64, tmp, rnd);
-        const bool made_dir = tm_os_api->file_system->make_directory(dir);
-        if (!made_dir) {
-            error = tm_temp_allocator_api->printf(ta, "Could not create temp directory %s", dir);
+        const char* c_file_path = write_c_file_to_temp_path(tt, c_file, ta);
+        if (!c_file_path) {
+            error = "Couldn't write temp file";
             break;
         }
-        const char* c_file_path = tm_temp_allocator_api->printf(ta, "%s\\temp.c", dir);
-        const tm_file_o f = tm_os_api->file_io->open_output(c_file_path);
-        tm_os_api->file_io->write(f, text, strlen(text));
-        tm_os_api->file_io->close(f);
 
+        out_file_path = tm_temp_allocator_api->printf(ta, "%s.dll", c_file_path);
         const char* HEADERS = "C:/Work/themachinery";
         const char* FLAGS_T = "-I %s -Wno-microsoft-anon-tag -fms-extensions -Werror";
         const char* FLAGS = tm_temp_allocator_api->printf(ta, FLAGS_T, HEADERS);
-        out_file_path = tm_temp_allocator_api->printf(ta, "%s\\temp.dll", dir);
+
         const char* zig = tm_temp_allocator_api->printf(ta, "zig cc %s -shared -o %s %s", c_file_path, out_file_path, FLAGS);
         int exit_code;
         const char* result = tm_os_api->system->execute_stdout(zig, 0, ta, &exit_code);
@@ -187,6 +203,24 @@ static tm_asset_browser_create_asset_i asset_browser__create_asset__c_file_i = {
     .create = asset_browser__create_asset__c_file,
 };
 
+static void asset__open__c_file(struct tm_application_o* app, struct tm_ui_o* ui, struct tm_tab_i* from_tab, tm_the_truth_o* tt, tm_tt_id_t asset)
+{
+    TM_INIT_TEMP_ALLOCATOR(ta);
+    if (TM_STRHASH_U64(tm_the_truth_api->type_name_hash(tt, tm_tt_type(asset))) == TM_STRHASH_U64(TM_TT_TYPE_HASH__ASSET))
+        asset = tm_the_truth_api->get_subobject(tt, tm_tt_read(tt, asset), TM_TT_PROP__ASSET__OBJECT);
+
+    const char* path = write_c_file_to_temp_path(tt, asset, ta);
+    if (path)
+        tm_os_api->system->open_file(path);
+
+    // TODO: Monitor the path for changes... if any changes are detected, reimport the file (and compile it?)
+    TM_SHUTDOWN_TEMP_ALLOCATOR(ta);
+}
+
+static struct tm_asset_open_aspect_i asset__open__c_file_i = {
+    .open = asset__open__c_file,
+};
+
 static void truth__create_types(tm_the_truth_o* tt)
 {
     const tm_the_truth_property_definition_t c_file_properties[] = {
@@ -199,6 +233,7 @@ static void truth__create_types(tm_the_truth_o* tt)
 
     tm_the_truth_api->set_aspect(tt, c_file, TM_TT_ASPECT__FILE_EXTENSION, "c");
     tm_the_truth_api->set_aspect(tt, c_file, TM_TT_ASPECT__PROPERTIES, &properties__c_file_i);
+    tm_the_truth_api->set_aspect(tt, c_file, TM_TT_ASPECT__ASSET_OPEN, &asset__open__c_file_i);
 }
 
 TM_DLL_EXPORT void tm_load_plugin(struct tm_api_registry_api* reg, bool load)

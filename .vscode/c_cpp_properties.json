@@ -9,7 +9,7 @@
                 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/ucrt",
                 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/shared",
                 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/winrt",
-                "${TM_SDK_DIR}/headers",
+                "C:/Work/themachinery",
             ],
             "defines": [
                 "_DEBUG",
@@ -24,7 +24,7 @@
                     "C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/ucrt",
                     "C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/shared",
                     "C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/winrt",
-                    "${TM_SDK_DIR}/headers"
+                    "C:/Work/themachinery"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
                 "databaseFilename": ""

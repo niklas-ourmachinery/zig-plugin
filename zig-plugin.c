@@ -9,6 +9,8 @@ static struct tm_the_truth_assets_api* tm_the_truth_assets_api;
 static struct tm_os_api* tm_os_api;
 static struct tm_random_api* tm_random_api;
 static struct tm_temp_allocator_api* tm_temp_allocator_api;
+static struct tm_allocator_api* tm_allocator_api;
+static struct tm_the_machinery_api* tm_the_machinery_api;
 
 #include "zig-plugin.h"
 
@@ -19,6 +21,7 @@ static struct tm_temp_allocator_api* tm_temp_allocator_api;
 #include <foundation/macros.h>
 #include <foundation/os.h>
 #include <foundation/plugin_assets.h>
+#include <foundation/plugin_callbacks.h>
 #include <foundation/random.h>
 #include <foundation/rect.inl>
 #include <foundation/temp_allocator.h>
@@ -32,8 +35,20 @@ static struct tm_temp_allocator_api* tm_temp_allocator_api;
 #include <plugins/ui/draw2d.h>
 #include <plugins/ui/ui.h>
 
+#include <the_machinery/the_machinery.h>
+
 #include <inttypes.h>
 #include <string.h>
+
+struct monitored_file_t {
+    tm_the_truth_o* tt;
+    tm_tt_id_t c_file;
+    tm_file_stat_t stat;
+    char* path;
+};
+
+tm_allocator_i* allocator;
+struct monitored_file_t* monitored_files;
 
 static const char* minimal_template
     = "static struct tm_logger_api* tm_logger_api;\n"
@@ -66,11 +81,32 @@ static const char* write_c_file_to_temp_path(tm_the_truth_o* tt, tm_tt_id_t c_fi
     if (!dir)
         return 0;
     const char* c_file_path = tm_temp_allocator_api->printf(ta, "%s\\temp.c", dir);
-    const uint64_t text_len = strlen(text);
     const tm_file_o f = tm_os_api->file_io->open_output(c_file_path);
     const bool success = tm_os_api->file_io->write(f, text, strlen(text));
     tm_os_api->file_io->close(f);
     return success ? c_file_path : 0;
+}
+
+static void read_c_file_from_path(tm_the_truth_o* tt, tm_tt_id_t c_file, const char* path, tm_tt_undo_scope_t undo_scope)
+{
+    TM_INIT_TEMP_ALLOCATOR(ta);
+
+    const tm_file_stat_t stat = tm_os_api->file_system->stat(path);
+    if (stat.exists && stat.size > 0) {
+        char* buffer = 0;
+        tm_carray_temp_resize(buffer, stat.size + 1, ta);
+        tm_file_o f = tm_os_api->file_io->open_input(path);
+        const int64_t read = tm_os_api->file_io->read(f, buffer, stat.size);
+        tm_os_api->file_io->close(f);
+        buffer[stat.size] = 0;
+        if (read == (int64_t)stat.size) {
+            tm_the_truth_object_o* c_file_w = tm_the_truth_api->write(tt, c_file);
+            tm_the_truth_api->set_string(tt, c_file_w, TM_TT_PROP__C_FILE__TEXT, buffer);
+            tm_the_truth_api->commit(tt, c_file_w, undo_scope);
+        }
+    }
+
+    TM_SHUTDOWN_TEMP_ALLOCATOR(ta);
 }
 
 static void private__compile(tm_the_truth_o* tt, tm_tt_id_t c_file, tm_tt_undo_scope_t undo_scope, tm_ui_o* ui)
@@ -206,19 +242,69 @@ static tm_asset_browser_create_asset_i asset_browser__create_asset__c_file_i = {
 static void asset__open__c_file(struct tm_application_o* app, struct tm_ui_o* ui, struct tm_tab_i* from_tab, tm_the_truth_o* tt, tm_tt_id_t asset)
 {
     TM_INIT_TEMP_ALLOCATOR(ta);
-    if (TM_STRHASH_U64(tm_the_truth_api->type_name_hash(tt, tm_tt_type(asset))) == TM_STRHASH_U64(TM_TT_TYPE_HASH__ASSET))
-        asset = tm_the_truth_api->get_subobject(tt, tm_tt_read(tt, asset), TM_TT_PROP__ASSET__OBJECT);
 
-    const char* path = write_c_file_to_temp_path(tt, asset, ta);
+    tm_tt_id_t c_file = asset;
+    if (TM_STRHASH_U64(tm_the_truth_api->type_name_hash(tt, tm_tt_type(c_file))) == TM_STRHASH_U64(TM_TT_TYPE_HASH__ASSET))
+        c_file = tm_the_truth_api->get_subobject(tt, tm_tt_read(tt, c_file), TM_TT_PROP__ASSET__OBJECT);
+
+    for (struct monitored_file_t* m = monitored_files; m != tm_carray_end(monitored_files); ++m) {
+        if (m->tt == tt && m->c_file.u64 == c_file.u64) {
+            tm_os_api->system->open_file(m->path);
+            return;
+        }
+    }
+
+    const char* path = write_c_file_to_temp_path(tt, c_file, ta);
     if (path)
         tm_os_api->system->open_file(path);
 
-    // TODO: Monitor the path for changes... if any changes are detected, reimport the file (and compile it?)
+    struct monitored_file_t m = {
+        .tt = tt,
+        .c_file = c_file,
+        .stat = tm_os_api->file_system->stat(path),
+    };
+    tm_carray_resize(m.path, strlen(path) + 1, allocator);
+    memcpy(m.path, path, tm_carray_bytes(m.path));
+    tm_carray_push(monitored_files, m, allocator);
+
     TM_SHUTDOWN_TEMP_ALLOCATOR(ta);
 }
 
 static struct tm_asset_open_aspect_i asset__open__c_file_i = {
     .open = asset__open__c_file,
+};
+
+static void private__monitor_files(tm_the_truth_o* tt)
+{
+    for (struct monitored_file_t* m = monitored_files; m != tm_carray_end(monitored_files); ++m) {
+        if (m->tt != tt)
+            continue;
+
+        tm_file_stat_t stat = tm_os_api->file_system->stat(m->path);
+        if (!stat.exists) {
+            m->tt = 0;
+            continue;
+        }
+
+        if (stat.size != m->stat.size || memcmp(&stat.last_modified_time, &m->stat.last_modified_time, sizeof(tm_file_time_o)) != 0) {
+            tm_tt_undo_scope_t undo_scope = tm_the_truth_api->create_undo_scope(tt, TM_LOCALIZE("Read text from external file"));
+            read_c_file_from_path(tt, m->c_file, m->path, undo_scope);
+            private__compile(m->tt, m->c_file, undo_scope, 0);
+            m->stat = stat;
+
+            // TODO: Should push to global undo stack here.
+        }
+    }
+}
+
+static void plugin__tick(struct tm_plugin_o* inst, float dt)
+{
+    tm_the_truth_o* tt = tm_the_machinery_api->get_truth(tm_the_machinery_api->app);
+    private__monitor_files(tt);
+}
+
+static struct tm_plugin_tick_i plugin_tick_i = {
+    .tick = plugin__tick,
 };
 
 static void truth__create_types(tm_the_truth_o* tt)
@@ -249,7 +335,12 @@ TM_DLL_EXPORT void tm_load_plugin(struct tm_api_registry_api* reg, bool load)
     tm_os_api = reg->get(TM_OS_API_NAME);
     tm_random_api = reg->get(TM_RANDOM_API_NAME);
     tm_temp_allocator_api = reg->get(TM_TEMP_ALLOCATOR_API_NAME);
+    tm_allocator_api = reg->get(TM_ALLOCATOR_API_NAME);
+    tm_the_machinery_api = reg->get(TM_THE_MACHINERY_API_NAME);
+
+    allocator = tm_allocator_api->system;
 
     tm_add_or_remove_implementation(reg, load, TM_THE_TRUTH_CREATE_TYPES_INTERFACE_NAME, truth__create_types);
     tm_add_or_remove_implementation(reg, load, TM_ASSET_BROWSER_CREATE_ASSET_INTERFACE_NAME, &asset_browser__create_asset__c_file_i);
+    tm_add_or_remove_implementation(reg, load, TM_PLUGIN_TICK_INTERFACE_NAME, &plugin_tick_i);
 }

@@ -14,6 +14,4 @@ With this plugin installed, you can do **New C File** in the Asset Browser conte
 
 ## To Do
 
-* Add a text editor for editing the `.c` files in The Machinery.
-* Add the possibility to open the `.c` files in an external editor.
 * Support compiling `.zig` files in addition to `.c` files.

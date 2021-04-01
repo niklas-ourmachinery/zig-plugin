@@ -3,4 +3,5 @@
 
 enum {
     TM_TT_PROP__C_FILE__TEXT, // string
+    TM_TT_PROP__C_FILE__DLL, // reference [[TM_TT_TYPE__PLUGIN]]
 };

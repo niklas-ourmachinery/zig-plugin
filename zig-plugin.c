@@ -65,6 +65,110 @@ static const char* minimal_template
       "}\n"
       "";
 
+static const char* custom_tab_template
+    = "static struct tm_api_registry_api* tm_global_api_registry;\n"
+      "\n"
+      "static struct tm_draw2d_api* tm_draw2d_api;\n"
+      "static struct tm_ui_api* tm_ui_api;\n"
+      "\n"
+      "#include <foundation/allocator.h>\n"
+      "#include <foundation/api_registry.h>\n"
+      "\n"
+      "#include <plugins/ui/docking.h>\n"
+      "#include <plugins/ui/draw2d.h>\n"
+      "#include <plugins/ui/ui.h>\n"
+      "#include <plugins/ui/ui_custom.h>\n"
+      "\n"
+      "#include <the_machinery/the_machinery_tab.h>\n"
+      "\n"
+      "#include <stdio.h>\n"
+      "\n"
+      "TM_DLL_EXPORT void load_custom_tab(struct tm_api_registry_api* reg, bool load);\n"
+      "\n"
+      "#define TM_CUSTOM_TAB_VT_NAME \"tm_custom_tab\"\n"
+      "#define TM_CUSTOM_TAB_VT_NAME_HASH TM_STATIC_HASH(\"tm_custom_tab\", 0xbc4e3e47fbf1cdc1ULL)\n"
+      "\n"
+      "struct tm_tab_o {\n"
+      "    tm_tab_i tm_tab_i;\n"
+      "    tm_allocator_i* allocator;\n"
+      "};\n"
+      "\n"
+      "static void tab__ui(tm_tab_o* tab, tm_ui_o* ui, const tm_ui_style_t* uistyle, tm_rect_t rect)\n"
+      "{\n"
+      "    tm_ui_buffers_t uib = tm_ui_api->buffers(ui);\n"
+      "    tm_draw2d_style_t* style = &(tm_draw2d_style_t){ 0 };\n"
+      "    tm_ui_api->to_draw_style(ui, style, uistyle);\n"
+      "\n"
+      "    style->color = (tm_color_srgb_t){ .a = 255, .r = 255 };\n"
+      "    tm_draw2d_api->fill_rect(uib.vbuffer, *uib.ibuffers, style, rect);\n"
+      "}\n"
+      "\n"
+      "static const char* tab__create_menu_name(void)\n"
+      "{\n"
+      "    return \"Custom Tab\";\n"
+      "}\n"
+      "\n"
+      "static const char* tab__title(tm_tab_o* tab, struct tm_ui_o* ui)\n"
+      "{\n"
+      "    return \"Custom Tab\";\n"
+      "}\n"
+      "\n"
+      "static bool tab__need_update(tm_tab_o* tab)\n"
+      "{\n"
+      "    return true;\n"
+      "}\n"
+      "\n"
+      "static tm_tab_i* tab__create(tm_tab_create_context_t* context, tm_ui_o* ui)\n"
+      "{\n"
+      "    tm_allocator_i* allocator = context->allocator;\n"
+      "    uint64_t* id = context->id;\n"
+      "\n"
+      "    static tm_the_machinery_tab_vt* vt = 0;\n"
+      "    if (!vt)\n"
+      "        vt = tm_global_api_registry->get(TM_CUSTOM_TAB_VT_NAME);\n"
+      "\n"
+      "    tm_tab_o* tab = tm_alloc(allocator, sizeof(tm_tab_o));\n"
+      "    *tab = (tm_tab_o){\n"
+      "        .tm_tab_i = {\n"
+      "            .vt = (tm_tab_vt*)vt,\n"
+      "            .inst = (tm_tab_o*)tab,\n"
+      "            .root_id = *id,\n"
+      "        },\n"
+      "        .allocator = allocator,\n"
+      "    };\n"
+      "\n"
+      "    *id += 1000000;\n"
+      "    return &tab->tm_tab_i;\n"
+      "}\n"
+      "\n"
+      "static void tab__destroy(tm_tab_o* tab)\n"
+      "{\n"
+      "    tm_free(tab->allocator, tab, sizeof(*tab));\n"
+      "}\n"
+      "\n"
+      "static tm_the_machinery_tab_vt* custom_tab_vt = &(tm_the_machinery_tab_vt){\n"
+      "    .name = TM_CUSTOM_TAB_VT_NAME,\n"
+      "    .name_hash = TM_CUSTOM_TAB_VT_NAME_HASH,\n"
+      "    .create_menu_name = tab__create_menu_name,\n"
+      "    .create = tab__create,\n"
+      "    .destroy = tab__destroy,\n"
+      "    .title = tab__title,\n"
+      "    .ui = tab__ui,\n"
+      "    .need_update = tab__need_update,\n"
+      "};\n"
+      "\n"
+      "TM_DLL_EXPORT void tm_load_plugin(struct tm_api_registry_api* reg, bool load)\n"
+      "{\n"
+      "    tm_global_api_registry = reg;\n"
+      "\n"
+      "    tm_draw2d_api = reg->get(TM_DRAW2D_API_NAME);\n"
+      "    tm_ui_api = reg->get(TM_UI_API_NAME);\n"
+      "\n"
+      "    tm_set_or_remove_api(reg, load, TM_CUSTOM_TAB_VT_NAME, custom_tab_vt);\n"
+      "    tm_add_or_remove_implementation(reg, load, TM_TAB_VT_INTERFACE_NAME, custom_tab_vt);\n"
+      "}\n"
+      "";
+
 static const char* temp_dir(tm_temp_allocator_i* ta)
 {
     const char* tmp = tm_os_api->file_system->temp_directory(ta);
@@ -230,12 +334,12 @@ static struct tm_properties_aspect_i properties__c_file_i = {
 static tm_tt_id_t asset_browser__create_asset__c_file(struct tm_asset_browser_create_asset_o* inst, tm_the_truth_o* tt, tm_tt_undo_scope_t undo_scope)
 {
     return tm_the_truth_api->quick_create_object(tt, undo_scope, TM_TT_TYPE_HASH__C_FILE,
-        TM_TT_PROP__C_FILE__TEXT, minimal_template, -1);
+        TM_TT_PROP__C_FILE__TEXT, custom_tab_template, -1);
 }
 
 static tm_asset_browser_create_asset_i asset_browser__create_asset__c_file_i = {
-    .menu_name = TM_LOCALIZE_LATER("New C File"),
-    .asset_name = TM_LOCALIZE_LATER("minimal"),
+    .menu_name = TM_LOCALIZE_LATER("New C File (Custom Tab)"),
+    .asset_name = TM_LOCALIZE_LATER("custom_tab"),
     .create = asset_browser__create_asset__c_file,
 };
 

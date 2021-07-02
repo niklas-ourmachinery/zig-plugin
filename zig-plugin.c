@@ -343,7 +343,7 @@ static tm_asset_browser_create_asset_i asset_browser__create_asset__c_file_i = {
     .create = asset_browser__create_asset__c_file,
 };
 
-static void asset__open__c_file(struct tm_application_o* app, struct tm_ui_o* ui, struct tm_tab_i* from_tab, tm_the_truth_o* tt, tm_tt_id_t asset)
+static void asset__open__c_file(struct tm_application_o* app, struct tm_ui_o* ui, struct tm_tab_i* from_tab, tm_the_truth_o* tt, tm_tt_id_t asset, enum tm_asset_open_mode open_mode)
 {
     TM_INIT_TEMP_ALLOCATOR(ta);
 
